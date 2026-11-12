@@ -93,7 +93,7 @@ import MuralCore
 }
 
 enum CredentialStore {
-    private static let service = "no.william.mural.openai"
+    private static let service = "chat.mural.gemini"
     private static var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "owner", kSecAttrSynchronizable as String: false] }
     static func read() -> String? {
         var q = query; q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -104,7 +104,7 @@ enum CredentialStore {
     static var hasKey: Bool { read() != nil }
     static func save(_ key: String) throws {
         let value = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard value.hasPrefix("sk-"), value.count >= 20, !value.contains(where: \.isWhitespace) else { throw KeyError.invalid }
+        guard value.count >= 20, !value.contains(where: \.isWhitespace) else { throw KeyError.invalid }
         let data = Data(value.utf8)
         let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
@@ -121,7 +121,7 @@ enum CredentialStore {
         case invalid, save, remove
         var errorDescription: String? {
             switch self {
-            case .invalid: "Enter a valid OpenAI API key."
+            case .invalid: "Enter a valid Gemini API key."
             case .save: "The key couldn’t be saved to this device’s Keychain."
             case .remove: "The key couldn’t be removed. Unlock this iPhone and try again."
             }
