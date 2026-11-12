@@ -2,12 +2,47 @@ import AVFoundation
 import Foundation
 import MuralCore
 import Speech
+import os
+
+/// Thread-safe audio capture state holder accessed by CoreAudio real-time tap.
+private final class AudioState: @unchecked Sendable {
+    private var lock = os_unfair_lock()
+    private var _isCapturingAudio: Bool = false
+    private var _latestRMS: Float = 0.0
+
+    var isCapturingAudio: Bool {
+        get {
+            os_unfair_lock_lock(&lock)
+            defer { os_unfair_lock_unlock(&lock) }
+            return _isCapturingAudio
+        }
+        set {
+            os_unfair_lock_lock(&lock)
+            _isCapturingAudio = newValue
+            os_unfair_lock_unlock(&lock)
+        }
+    }
+
+    var latestRMS: Float {
+        get {
+            os_unfair_lock_lock(&lock)
+            defer { os_unfair_lock_unlock(&lock) }
+            return _latestRMS
+        }
+        set {
+            os_unfair_lock_lock(&lock)
+            _latestRMS = newValue
+            os_unfair_lock_unlock(&lock)
+        }
+    }
+}
 
 /// On-device Parlo transport conforming to the interface expected by `ConversationCoordinator`.
 ///
 /// Implements:
 /// - 100% on-device speech recognition via `SFSpeechRecognizer` (`requiresOnDeviceRecognition = true`).
-/// - 1.2–1.5s RMS silence endpointing.
+/// - Deterministic silence endpointing driven by ASR token stability (1.3s) and absolute turn timeout (10s).
+/// - Single session-scoped `AVAudioEngine` across turns with safe tap removal and pause.
 /// - Half-duplex handoff: ASR is paused while `AVSpeechSynthesizer` speaks.
 /// - Tap-to-interrupt (barge-in): immediate TTS cutoff returning to Listening.
 /// - 10 Hz EMA level metering for `MuralOrb`.
@@ -28,6 +63,9 @@ public final class OnDeviceParloTransport: NSObject {
     private var speechRecognizer: SFSpeechRecognizer?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
+    private var currentRecognitionTaskID: UUID?
+
+    private let audioState = AudioState()
 
     private let synthesizer = AVSpeechSynthesizer()
     private var isSynthesizerSpeaking = false
@@ -39,13 +77,16 @@ public final class OnDeviceParloTransport: NSObject {
 
     private var activeInstructions: String = ""
     private var currentDirective: String? = nil
+    private var currentTheme: ConversationTheme?
+    private var learnerState: LearnerState?
+    private var interests: String = ""
     private var conversationHistory: ConversationHistory = .empty
     private var exchangeIndex = 0
 
     // Audio & silence tracking
     private var currentUtteranceText = ""
-    private var lastSpeechTime: Date?
-    private var lastAudioBufferTime: Date?
+    private var lastASRTokenTime: Date?
+    private var utteranceStartTime: Date?
     private var silenceCheckTimer: Task<Void, Never>?
     private var levelMeterTimer: Task<Void, Never>?
 
@@ -67,18 +108,35 @@ public final class OnDeviceParloTransport: NSObject {
         levelMeterTimer?.cancel()
     }
 
+    // MARK: - Context Configuration
+
+    public func setTheme(_ theme: ConversationTheme?) {
+        self.currentTheme = theme
+    }
+
+    public func setLearnerContext(learner: LearnerState?, interests: String) {
+        self.learnerState = learner
+        self.interests = interests
+    }
+
     // MARK: - Transport Lifecycle
 
     public func connect(
         api: APIClient,
         instructions: String,
         history: [[String: Any]] = [],
-        hosted: Any? = nil
+        hosted: Any? = nil,
+        theme: ConversationTheme? = nil,
+        learner: LearnerState? = nil,
+        interests: String = ""
     ) async throws {
         disconnect()
 
         self.sessionID = UUID()
         self.activeInstructions = instructions
+        self.currentTheme = theme
+        self.learnerState = learner
+        self.interests = interests
         self.conversationHistory = .empty
         self.exchangeIndex = 0
         self.isClosing = false
@@ -108,6 +166,11 @@ public final class OnDeviceParloTransport: NSObject {
         // Configure session-scoped AVAudioSession
         try configureAudioSession()
 
+        // Keep a single AVAudioEngine initialized for the session duration
+        let engine = AVAudioEngine()
+        self.audioEngine = engine
+        engine.prepare()
+
         // Start level meter loop
         startLevelMeterLoop()
 
@@ -134,10 +197,16 @@ public final class OnDeviceParloTransport: NSObject {
         switch type {
         case "session.instructions.append":
             if let content = event["content"] as? String {
-                // Update ephemeral turn directive
                 self.currentDirective = content
-                // If it's a greeting or help directive sent while idle, trigger a turn
-                if content.contains("Begin this new conversation") || content.contains("Resume the conversation") {
+
+                if content.contains("The learner typed: ") {
+                    if let range = content.range(of: "The learner typed: ") {
+                        let typedText = String(content[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        Task { @MainActor in
+                            await self.generateAssistantTurn(learnerUtterance: typedText)
+                        }
+                    }
+                } else if content.contains("Begin now in English") || content.contains("Begin this new conversation") || content.contains("Resume the conversation") {
                     Task { @MainActor in
                         await self.generateAssistantTurn(learnerUtterance: "")
                     }
@@ -145,20 +214,24 @@ public final class OnDeviceParloTransport: NSObject {
                     Task { @MainActor in
                         await self.generateAssistantTurn(learnerUtterance: "Can you help me understand?")
                     }
-                } else if content.contains("The learner has been quiet") {
+                } else if content.contains("Check in with the learner") || content.contains("The learner has been quiet") {
                     Task { @MainActor in
                         await self.generateAssistantTurn(learnerUtterance: "")
+                    }
+                } else if content.contains("The learner selected a theme") {
+                    if let matched = ConversationTheme.shared.first(where: { content.contains($0.situation) }) {
+                        self.currentTheme = matched
+                    } else if content.contains("Free conversation") {
+                        self.currentTheme = nil
                     }
                 }
             }
             return true
 
         case "session.thinking.append":
-            // Learner typed message context
             return true
 
         case "session.commentary.append":
-            // Spoken text to speak via TTS
             if let content = event["content"] as? String {
                 Task { @MainActor in
                     self.speak(text: content)
@@ -178,7 +251,6 @@ public final class OnDeviceParloTransport: NSObject {
     public func mute(_ muted: Bool) {
         self.isMuted = muted
         if muted {
-            // If user mutes mid-utterance, finalize pending utterance if any
             if !currentUtteranceText.isEmpty {
                 finalizeLearnerUtterance()
             }
@@ -208,6 +280,14 @@ public final class OnDeviceParloTransport: NSObject {
         smoothedOutputLevel = 0
         onLevels?(0, 0)
 
+        if let engine = audioEngine {
+            if engine.isRunning {
+                engine.stop()
+            }
+            engine.inputNode.removeTap(onBus: 0)
+        }
+        audioEngine = nil
+
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         } catch {}
@@ -228,16 +308,19 @@ public final class OnDeviceParloTransport: NSObject {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard let self else { return }
 
+                // Controlled 10 Hz cadence reading atomically from audioState
+                let latestRMS = Double(self.audioState.latestRMS)
+                self.currentInputRMS = latestRMS
+
                 // 10 Hz EMA smoothing
-                if self.isMuted || self.isSynthesizerSpeaking || self.isThinking {
+                if self.isMuted || self.isSynthesizerSpeaking || self.isThinking || !self.audioState.isCapturingAudio {
                     self.smoothedInputLevel = self.smoothedInputLevel * 0.35
                 } else {
-                    let target = min(1.0, self.currentInputRMS * 4.0)
+                    let target = min(1.0, latestRMS * 4.0)
                     self.smoothedInputLevel = self.smoothedInputLevel * 0.35 + target * 0.65
                 }
 
                 if self.isSynthesizerSpeaking {
-                    // Pulsed output level envelope for speaking
                     let pulse = Double.random(in: 0.35...0.75)
                     self.smoothedOutputLevel = self.smoothedOutputLevel * 0.35 + pulse * 0.65
                 } else {
@@ -253,32 +336,57 @@ public final class OnDeviceParloTransport: NSObject {
 
     private func startListening() throws {
         guard !isSynthesizerSpeaking && !isThinking && !isMuted && !isClosing else { return }
+        guard !audioState.isCapturingAudio else { return }
+
+        // Clean up any lingering request or task before starting a new listening turn
         stopListening()
 
-        let engine = AVAudioEngine()
+        let engine = self.audioEngine ?? AVAudioEngine()
         self.audioEngine = engine
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0 else { return }
+
+        if !engine.isRunning {
+            try engine.start()
+        }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true
         request.shouldReportPartialResults = true
         self.recognitionRequest = request
         self.currentUtteranceText = ""
-        self.lastSpeechTime = nil
+        self.lastASRTokenTime = nil
+        self.utteranceStartTime = nil
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        // Set capturing flag before installing tap
+        audioState.isCapturingAudio = true
+        let taskID = UUID()
+        self.currentRecognitionTaskID = taskID
+
+        inputNode.removeTap(onBus: 0)
+        let state = self.audioState
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak request] buffer, _ in
+            guard state.isCapturingAudio, let request else { return }
             request.append(buffer)
-            self?.calculateInputRMS(from: buffer)
-        }
 
-        try engine.start()
+            guard let channelData = buffer.floatChannelData?[0] else { return }
+            let frames = Int(buffer.frameLength)
+            if frames > 0 {
+                var sum: Float = 0
+                for i in 0..<frames {
+                    let sample = channelData[i]
+                    sum += sample * sample
+                }
+                state.latestRMS = sqrt(sum / Float(frames))
+            }
+        }
 
         guard let recognizer = speechRecognizer else { return }
         self.recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.currentRecognitionTaskID == taskID else { return }
+                guard self.audioState.isCapturingAudio || !self.currentUtteranceText.isEmpty else { return }
                 if let result {
                     let text = result.bestTranscription.formattedString
                     self.handlePartialTranscription(text)
@@ -293,51 +401,50 @@ public final class OnDeviceParloTransport: NSObject {
         silenceCheckTimer?.cancel()
         silenceCheckTimer = nil
 
+        // 1. Set isCapturingAudio = false
+        audioState.isCapturingAudio = false
+
+        // 2. Remove input tap on bus 0
+        if let engine = audioEngine {
+            engine.inputNode.removeTap(onBus: 0)
+            // 3. Pause or stop the engine input (do not rebuild the engine)
+            if engine.isRunning {
+                engine.pause()
+            }
+        }
+
+        // 4. Only then call recognitionRequest?.endAudio()
         recognitionRequest?.endAudio()
         recognitionRequest = nil
+
+        currentRecognitionTaskID = nil
         recognitionTask?.cancel()
         recognitionTask = nil
 
-        if let engine = audioEngine {
-            if engine.isRunning {
-                engine.stop()
-            }
-            engine.inputNode.removeTap(onBus: 0)
-        }
-        audioEngine = nil
         currentInputRMS = 0
-    }
-
-    private func calculateInputRMS(from buffer: AVAudioPCMBuffer) {
-        guard let channelData = buffer.floatChannelData?[0] else { return }
-        let frames = Int(buffer.frameLength)
-        guard frames > 0 else { return }
-
-        var sum: Float = 0
-        for i in 0..<frames {
-            let sample = channelData[i]
-            sum += sample * sample
-        }
-        let rms = sqrt(sum / Float(frames))
-        Task { @MainActor [weak self] in
-            self?.currentInputRMS = Double(rms)
-            if rms > 0.03 {
-                self?.lastSpeechTime = Date()
-            }
-        }
+        audioState.latestRMS = 0
     }
 
     private func handlePartialTranscription(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        let delta = trimmed.hasPrefix(currentUtteranceText)
-            ? String(trimmed.dropFirst(currentUtteranceText.count))
-            : trimmed
-        self.currentUtteranceText = trimmed
-        self.lastSpeechTime = Date()
+        let previousWords = currentUtteranceText.split(separator: " ").map(String.init)
+        let newWords = trimmed.split(separator: " ").map(String.init)
 
-        if !delta.isEmpty {
+        if utteranceStartTime == nil {
+            utteranceStartTime = Date()
+        }
+
+        if newWords != previousWords {
+            lastASRTokenTime = Date()
+        }
+
+        // Prevent duplicated text on ASR revisions:
+        // Only emit clean deltas for newly appended words beyond what has already been emitted
+        if newWords.count > previousWords.count {
+            let newSuffix = newWords[previousWords.count...].joined(separator: " ")
+            let delta = currentUtteranceText.isEmpty ? newSuffix : " " + newSuffix
             onEvent?([
                 "type": "session.input_transcript.delta",
                 "delta": delta,
@@ -345,19 +452,26 @@ public final class OnDeviceParloTransport: NSObject {
                 "end_ms": 100
             ])
         }
+
+        self.currentUtteranceText = trimmed
     }
 
     private func startSilenceCheckTimer() {
         silenceCheckTimer?.cancel()
         silenceCheckTimer = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(200))
+                try? await Task.sleep(for: .milliseconds(100))
                 guard let self else { return }
 
-                // 1.2–1.5s silence endpointing after speech has occurred
-                if let lastSpeech = self.lastSpeechTime,
-                   !self.currentUtteranceText.isEmpty,
-                   Date().timeIntervalSince(lastSpeech) >= 1.3 {
+                // Silence endpointing is driven by:
+                // 1. ASR partial text stability (no new tokens for 1.3s while !currentUtteranceText.isEmpty)
+                // 2. Absolute turn timeout (10s while !currentUtteranceText.isEmpty) to guard against continuous ambient noise
+                guard !self.currentUtteranceText.isEmpty else { continue }
+                let now = Date()
+                let tokenSilence = self.lastASRTokenTime.map { now.timeIntervalSince($0) >= 1.3 } ?? false
+                let absoluteTimeout = self.utteranceStartTime.map { now.timeIntervalSince($0) >= 10.0 } ?? false
+
+                if tokenSilence || absoluteTimeout {
                     self.finalizeLearnerUtterance()
                     break
                 }
@@ -381,11 +495,11 @@ public final class OnDeviceParloTransport: NSObject {
         guard !isThinking && !isClosing else { return }
         isThinking = true
 
-        // Assemble bounded instructions
+        // Forward theme, learner context, and user interests into bounded instructions
         let instructions = promptBuilder.instructions(
-            theme: nil,
-            learner: nil,
-            interests: "",
+            theme: currentTheme,
+            learner: learnerState,
+            interests: interests,
             ephemeralDirective: currentDirective
         )
         self.currentDirective = nil // consume ephemeral directive

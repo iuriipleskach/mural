@@ -26,6 +26,7 @@ public struct ProviderFailure: LocalizedError, Sendable {
     public let code: String?
     public let reference: String?
     public var kind: ProviderFailureKind { .classify(status: status, code: code) }
+    public static let missingKey = ProviderFailure(status: 401, reference: "missing_key")
     public init(status: Int, body: Data = Data(), reference: String? = nil) {
         self.status = status
         let json = body.count <= 16_384 ? (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] : nil

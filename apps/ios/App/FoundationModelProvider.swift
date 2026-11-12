@@ -91,7 +91,7 @@ public struct FoundationModelProvider: RoleplayModelProviding, SessionAssessment
         #if canImport(FoundationModels)
         if Self.isAvailable {
             let session = LanguageModelSession(instructions: prompt.instructions)
-            let renderedPrompt = promptBuilder.render(prompt)
+            let renderedPrompt = promptBuilder.render(prompt, includeInstructions: false)
             let response = try await session.respond(to: renderedPrompt, generating: AFMRoleplayTurn.self)
             let raw = response.content
 

@@ -86,8 +86,12 @@ public struct PromptBuilder: Sendable, Equatable {
     }
 
     /// Renders instructions + condensed summary + recent exchanges + pending utterance.
-    public func render(_ prompt: RoleplayPrompt) -> String {
-        var sections: [String] = [prompt.instructions]
+    /// When `includeInstructions` is false, omits system instructions (e.g. for `LanguageModelSession` which receives instructions separately).
+    public func render(_ prompt: RoleplayPrompt, includeInstructions: Bool = true) -> String {
+        var sections: [String] = []
+        if includeInstructions && !prompt.instructions.isEmpty {
+            sections.append(prompt.instructions)
+        }
         if let summary = prompt.history.summary, !summary.isEmpty {
             sections.append("Earlier in this conversation (condensed): \(summary)")
         }

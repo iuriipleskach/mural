@@ -5,6 +5,8 @@ import AVFoundation
 import UIKit
 import MuralCore
 
+public enum ConnectionState: Equatable, Sendable { case idle, connecting, active, closing, ended, failed }
+
 @MainActor @Observable final class ConversationCoordinator {
     let store: LearningStore
     private(set) var state: ConnectionState = .idle
@@ -114,7 +116,7 @@ import MuralCore
         error = nil; notice = nil; lastAssessmentKey = ""
         pendingCommands = [:]
         state = .connecting; isMuted = false
-        var record = SessionRecord(languageID: language.id, themeID: selectedTheme?.id, title: selectedTheme?.title)
+        let record = SessionRecord(languageID: language.id, themeID: selectedTheme?.id, title: selectedTheme?.title)
         session = record; store.save(record)
         let generation = record.id
         let learner = store.learner
@@ -123,7 +125,13 @@ import MuralCore
             guard let self else { return }
             do {
                 guard self.session?.id == generation, self.state == .connecting else { return }
-                try await self.transport.connect(api: self.api, instructions: instructions)
+                try await self.transport.connect(
+                    api: self.api,
+                    instructions: instructions,
+                    theme: self.selectedTheme,
+                    learner: learner,
+                    interests: self.store.preferences.interests
+                )
             }
             catch is CancellationError { return }
             catch {
@@ -159,6 +167,7 @@ import MuralCore
     func chooseTheme(_ theme: ConversationTheme?) {
         if !isRunning, session != nil { resetConversation() }
         selectedTheme = theme
+        transport.setTheme(theme)
         if state == .active || state == .connecting {
             session?.themeID = theme?.id; session?.title = theme?.title ?? language.defaultTitle
             startingWithHistory = false
@@ -304,8 +313,8 @@ import MuralCore
             else if state == .active { scheduleAssessment() }
         case "session.correction":
             if let correction = event["correction"] as? GatedCorrection {
-                if let lastUserIndex = session?.passages.lastIndex(where: { $0.speaker == .user }) {
-                    session?.passages[lastUserIndex].correction = correction
+                if let lastUserPassage = session?.passages.last(where: { $0.speaker == .user }) {
+                    session?.corrections[lastUserPassage.id] = correction
                     scheduleSave()
                 }
             }

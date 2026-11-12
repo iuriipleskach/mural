@@ -1,5 +1,15 @@
 import SwiftUI
 
+enum AudioVerification {
+    static var requested: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--verify-audio")
+        #else
+        false
+        #endif
+    }
+}
+
 @main struct MuralApp: App {
     @State private var store: LearningStore?
     @State private var startupError: String?

@@ -58,4 +58,41 @@ final class CorrectionGateTests: XCTestCase {
         let s2 = CorrectionSuggestion(originalSpan: "café", correctedSpan: "cafe", category: .register)
         XCTAssertNotNil(gate.suppressionReason(for: s2, learnerUtterance: "my café"))
     }
+
+    func testSessionRecordCorrectionStorageAndPassageAttachment() throws {
+        var session = SessionRecord(languageID: "en", title: "Practice")
+        let frag = Fragment(id: "frag-1", speaker: .user, text: "I goed there yesterday.", startMS: 0, endMS: 1500)
+        session.append(frag)
+
+        XCTAssertEqual(session.passages.count, 1)
+        XCTAssertNil(session.passages.first?.correction)
+
+        let suggestion = CorrectionSuggestion(originalSpan: "I goed", correctedSpan: "I went", category: .grammar)
+        let gated = gate.evaluate(suggestion, learnerUtterance: "I goed there yesterday.")
+        XCTAssertTrue(gated.isShown)
+
+        // Store correction keyed by passage ID (which matches the first fragment ID)
+        let passageID = session.passages[0].id
+        session.corrections[passageID] = gated
+
+        // Verify passages attaches correction
+        XCTAssertEqual(session.passages.first?.correction, gated)
+        XCTAssertEqual(session.passages.first?.correction?.corrected, "I went")
+
+        // Verify JSON roundtrip preserves corrections
+        let data = try JSONEncoder().encode(session)
+        let decoded = try JSONDecoder().decode(SessionRecord.self, from: data)
+        XCTAssertEqual(decoded.corrections[passageID], gated)
+        XCTAssertEqual(decoded.passages.first?.correction, gated)
+    }
+
+    func testTranscriptPassagesPreservesCorrectionsByKey() {
+        let frag1 = Fragment(id: "f-100", speaker: .user, text: "Hello", startMS: 0, endMS: 500)
+        let suggestion = CorrectionSuggestion(originalSpan: "Hello", correctedSpan: "Hi", category: .register)
+        let gated = GatedCorrection(suggestion: suggestion, outcome: .shown)
+
+        let passages = Transcript.passages([frag1], corrections: ["f-100": gated])
+        XCTAssertEqual(passages.count, 1)
+        XCTAssertEqual(passages.first?.correction, gated)
+    }
 }

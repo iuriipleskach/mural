@@ -76,7 +76,7 @@ public struct Passage: Identifiable, Sendable {
 
 public enum Transcript {
     /// Presentation grouping only: neither the gap nor the arrival of another speaker proves a completed turn.
-    public static func passages(_ fragments: [Fragment]) -> [Passage] {
+    public static func passages(_ fragments: [Fragment], corrections: [String: GatedCorrection] = [:]) -> [Passage] {
         var result: [Passage] = []
         let indexed = fragments.enumerated().sorted {
             $0.element.startMS == $1.element.startMS ? $0.offset < $1.offset : $0.element.startMS < $1.element.startMS
@@ -88,6 +88,14 @@ public enum Transcript {
                 result[i].fragments.append(fragment)
             } else {
                 result.append(Passage(id: fragment.id, speaker: fragment.speaker, fragments: [fragment]))
+            }
+        }
+        for i in result.indices {
+            let pid = result[i].id
+            if let c = corrections[pid] {
+                result[i].correction = c
+            } else if let firstFrag = result[i].fragments.first, let c = corrections[firstFrag.id] {
+                result[i].correction = c
             }
         }
         return result.sorted { $0.startMS < $1.startMS }
@@ -162,6 +170,7 @@ public struct SessionRecord: Codable, Identifiable, Sendable {
     public var fragments: [Fragment] = []
     public var assessments: [Assessment] = []
     public var translations: [String: String] = [:]
+    public var corrections: [String: GatedCorrection] = [:]
     public var topics: [TopicBrief] = []
     public var voiceSeconds: Double = 0
     public var usageFinal = false
@@ -169,11 +178,62 @@ public struct SessionRecord: Codable, Identifiable, Sendable {
     public var outputTokens = 0
     public var searchCalls = 0
     public var endReason: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, languageID, providerID, startedAt, endedAt, themeID, title
+        case fragments, assessments, translations, corrections, topics
+        case voiceSeconds, usageFinal, inputTokens, outputTokens, searchCalls, endReason
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.languageID = try container.decode(String.self, forKey: .languageID)
+        self.providerID = try container.decodeIfPresent(String.self, forKey: .providerID)
+        self.startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt) ?? Date()
+        self.endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+        self.themeID = try container.decodeIfPresent(String.self, forKey: .themeID)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.fragments = try container.decodeIfPresent([Fragment].self, forKey: .fragments) ?? []
+        self.assessments = try container.decodeIfPresent([Assessment].self, forKey: .assessments) ?? []
+        self.translations = try container.decodeIfPresent([String: String].self, forKey: .translations) ?? [:]
+        self.corrections = try container.decodeIfPresent([String: GatedCorrection].self, forKey: .corrections) ?? [:]
+        self.topics = try container.decodeIfPresent([TopicBrief].self, forKey: .topics) ?? []
+        self.voiceSeconds = try container.decodeIfPresent(Double.self, forKey: .voiceSeconds) ?? 0
+        self.usageFinal = try container.decodeIfPresent(Bool.self, forKey: .usageFinal) ?? false
+        self.inputTokens = try container.decodeIfPresent(Int.self, forKey: .inputTokens) ?? 0
+        self.outputTokens = try container.decodeIfPresent(Int.self, forKey: .outputTokens) ?? 0
+        self.searchCalls = try container.decodeIfPresent(Int.self, forKey: .searchCalls) ?? 0
+        self.endReason = try container.decodeIfPresent(String.self, forKey: .endReason)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(languageID, forKey: .languageID)
+        try container.encodeIfPresent(providerID, forKey: .providerID)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encodeIfPresent(endedAt, forKey: .endedAt)
+        try container.encodeIfPresent(themeID, forKey: .themeID)
+        try container.encode(title, forKey: .title)
+        try container.encode(fragments, forKey: .fragments)
+        try container.encode(assessments, forKey: .assessments)
+        try container.encode(translations, forKey: .translations)
+        try container.encode(corrections, forKey: .corrections)
+        try container.encode(topics, forKey: .topics)
+        try container.encode(voiceSeconds, forKey: .voiceSeconds)
+        try container.encode(usageFinal, forKey: .usageFinal)
+        try container.encode(inputTokens, forKey: .inputTokens)
+        try container.encode(outputTokens, forKey: .outputTokens)
+        try container.encode(searchCalls, forKey: .searchCalls)
+        try container.encodeIfPresent(endReason, forKey: .endReason)
+    }
+
     public init(languageID: String = LanguageRegistry.defaultID, themeID: String? = nil, title: String? = nil) {
         self.languageID = languageID; self.themeID = themeID
         self.title = title ?? LanguageRegistry.module(for: languageID)?.defaultTitle ?? "A conversation"
     }
-    public var passages: [Passage] { Transcript.passages(fragments) }
+    public var passages: [Passage] { Transcript.passages(fragments, corrections: corrections) }
     // Voice fragments use the provider timeline, which starts after the local connection attempt.
     // Place typed turns after received speech instead of mixing in the local wall clock.
     public var nextTypedVoiceOffsetMS: Int { min(fragments.map(\.endMS).max() ?? 0, Int.max - 2) + 1 }

@@ -43,4 +43,23 @@ final class PromptBuilderTests: XCTestCase {
         XCTAssertTrue(rendered.contains("Learner: I'd like an espresso."))
         XCTAssertTrue(rendered.contains("Respond with the next structured turn."))
     }
+
+    func testRenderDeduplicatesInstructionsWhenRequested() {
+        let prompt = RoleplayPrompt(
+            instructions: "You are Mural English Assistant.",
+            history: ConversationHistory(
+                summary: nil,
+                exchanges: [ConversationExchange(index: 0, learner: "Hi", partner: "Hello!")]
+            ),
+            learnerUtterance: "What is your name?"
+        )
+        let renderedWithout = builder.render(prompt, includeInstructions: false)
+        XCTAssertFalse(renderedWithout.contains("You are Mural English Assistant."))
+        XCTAssertTrue(renderedWithout.contains("Learner: Hi"))
+        XCTAssertTrue(renderedWithout.contains("Mural: Hello!"))
+        XCTAssertTrue(renderedWithout.contains("Learner: What is your name?"))
+
+        let renderedWith = builder.render(prompt, includeInstructions: true)
+        XCTAssertTrue(renderedWith.contains("You are Mural English Assistant."))
+    }
 }
