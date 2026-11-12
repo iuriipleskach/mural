@@ -60,6 +60,7 @@ public final class OnDeviceParloTransport: NSObject {
 
     private var sessionID = UUID()
     private var audioEngine: AVAudioEngine?
+    private var isTapInstalled = false
     private var speechRecognizer: SFSpeechRecognizer?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
@@ -281,10 +282,13 @@ public final class OnDeviceParloTransport: NSObject {
         onLevels?(0, 0)
 
         if let engine = audioEngine {
+            if isTapInstalled {
+                engine.inputNode.removeTap(onBus: 0)
+                isTapInstalled = false
+            }
             if engine.isRunning {
                 engine.stop()
             }
-            engine.inputNode.removeTap(onBus: 0)
         }
         audioEngine = nil
 
@@ -297,7 +301,7 @@ public final class OnDeviceParloTransport: NSObject {
 
     private func configureAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try session.setActive(true, options: .notifyOthersOnDeactivation)
     }
 
@@ -352,7 +356,11 @@ public final class OnDeviceParloTransport: NSObject {
         }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
-        request.requiresOnDeviceRecognition = true
+        if let recognizer = speechRecognizer {
+            request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+        } else {
+            request.requiresOnDeviceRecognition = true
+        }
         request.shouldReportPartialResults = true
         self.recognitionRequest = request
         self.currentUtteranceText = ""
@@ -364,7 +372,10 @@ public final class OnDeviceParloTransport: NSObject {
         let taskID = UUID()
         self.currentRecognitionTaskID = taskID
 
-        inputNode.removeTap(onBus: 0)
+        if isTapInstalled {
+            inputNode.removeTap(onBus: 0)
+            isTapInstalled = false
+        }
         let state = self.audioState
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak request] buffer, _ in
             guard state.isCapturingAudio, let request else { return }
@@ -381,6 +392,7 @@ public final class OnDeviceParloTransport: NSObject {
                 state.latestRMS = sqrt(sum / Float(frames))
             }
         }
+        isTapInstalled = true
 
         guard let recognizer = speechRecognizer else { return }
         self.recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
@@ -404,9 +416,12 @@ public final class OnDeviceParloTransport: NSObject {
         // 1. Set isCapturingAudio = false
         audioState.isCapturingAudio = false
 
-        // 2. Remove input tap on bus 0
+        // 2. Remove input tap on bus 0 ONLY if a tap is installed
         if let engine = audioEngine {
-            engine.inputNode.removeTap(onBus: 0)
+            if isTapInstalled {
+                engine.inputNode.removeTap(onBus: 0)
+                isTapInstalled = false
+            }
             // 3. Pause or stop the engine input (do not rebuild the engine)
             if engine.isRunning {
                 engine.pause()
