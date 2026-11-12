@@ -22,3 +22,14 @@ William requested on September 16, 2026 that required server deployment be part 
 - Record the deployed revision, verification results, rollback location and any remaining limits. Distinguish local tests, live verification, merging and deployment in the handover.
 
 Use the user's current instructions to resolve release scope and deferred work. Do not ask again for deployment approval already provided for that scope. This workflow does not authorize unrelated feature activation, pricing changes or destructive data operations.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues in `iuriipleskach/mural`. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context (`GLOSSARY.md` + `docs/adr/` at the repo root). See `docs/agents/domain.md`.
+

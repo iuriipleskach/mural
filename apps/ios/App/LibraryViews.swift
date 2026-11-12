@@ -7,12 +7,21 @@ struct ThemesView: View {
     let choose: (ConversationTheme?) -> Void
     @State private var search = ""
     @State private var category = "All"
-    @State private var current = false
     @Environment(\.dynamicTypeSize) private var typeSize
+
     private var themes: [ConversationTheme] {
-        coordinator.language.themes.filter { (category == "All" || $0.category == category) && (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) || $0.category.localizedCaseInsensitiveContains(search)) }
+        coordinator.language.themes.filter {
+            (category == "All" || $0.category == category) &&
+            (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) || $0.category.localizedCaseInsensitiveContains(search))
+        }
     }
-    private var categories: [String] { coordinator.language.themes.map(\.category).reduce(into: ["All"]) { if !$0.contains($1) { $0.append($1) } } }
+
+    private var categories: [String] {
+        coordinator.language.themes.map(\.category).reduce(into: ["All"]) {
+            if !$0.contains($1) { $0.append($1) }
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -32,7 +41,7 @@ struct ThemesView: View {
                 }.scrollIndicators(.hidden)
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: typeSize.isAccessibilitySize ? 260 : 150), spacing: 12)], spacing: 12) {
                     ForEach(themes) { theme in
-                        Button { if theme.id == "today" { current = true } else { choose(theme) } } label: {
+                        Button { choose(theme) } label: {
                             VStack(alignment: .leading, spacing: 28) {
                                 Image(systemName: theme.symbol).font(.system(size: 28, weight: .light)).foregroundStyle(MuralColor.secondary)
                                 VStack(alignment: .leading, spacing: 5) {
@@ -48,43 +57,6 @@ struct ThemesView: View {
             }.padding(24)
         }.foregroundStyle(MuralColor.ink)
             .searchable(text: $search, prompt: "Find a conversation")
-            .sheet(isPresented: $current) { CurrentTopicView(coordinator: coordinator) { choose(coordinator.selectedTheme) } }
-    }
-}
-
-struct CurrentTopicView: View {
-    let coordinator: ConversationCoordinator
-    let selected: () -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var query = ""
-    @State private var brief: TopicBrief?
-    @State private var loading = false
-    @State private var error: String?
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    PageHeading(eyebrow: "The world today", title: "A fresh conversation.", subtitle: "What would you like to talk about?")
-                    TextField(coordinator.language.topicPlaceholder, text: $query, axis: .vertical).padding(18).background(.white, in: RoundedRectangle(cornerRadius: 20))
-                    Button { find() } label: {
-                        HStack { Text(loading ? "Finding something interesting…" : "Find a topic"); Spacer(); if loading { ProgressView() } else { Image(systemName: "sparkle.magnifyingglass") } }.padding(18).background(MuralColor.peach, in: Capsule())
-                    }.disabled(loading || query.trimmingCharacters(in: .whitespaces).isEmpty)
-                    if let error { Text(error).font(.footnote).foregroundStyle(MuralColor.secondary) }
-                    if let brief {
-                        Text(.init(brief.text)).font(.body).textSelection(.enabled)
-                        SourcesView(sources: brief.sources, date: brief.retrievedAt)
-                        Button("Talk about this", systemImage: "waveform") { coordinator.discuss(brief); selected(); dismiss() }
-                            .font(.headline).padding(18).frame(maxWidth: .infinity).background(MuralColor.orange, in: Capsule())
-                    }
-                    Text("Current topics use your API key outside a conversation. Sources stay attached to the topic.").font(.footnote).foregroundStyle(MuralColor.secondary)
-                }.padding(26)
-            }.background(MuralColor.cream).foregroundStyle(MuralColor.ink)
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
-        }
-    }
-    private func find() {
-        loading = true; error = nil
-        Task { do { brief = try await coordinator.currentTopic(query) } catch { self.error = error.localizedDescription }; loading = false }
     }
 }
 
@@ -95,7 +67,10 @@ struct WordsView: View {
     @State private var sessions = false
     @State private var flashcards: FlashcardSession?
     private var learner: LearnerState { coordinator.store.learner }
-    private var words: [WordState] { learner.words.filter { search.isEmpty || $0.lemma.localizedCaseInsensitiveContains(search) || $0.meaning.localizedCaseInsensitiveContains(search) } }
+    private var words: [WordState] {
+        learner.words.filter { search.isEmpty || $0.lemma.localizedCaseInsensitiveContains(search) || $0.meaning.localizedCaseInsensitiveContains(search) }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -119,7 +94,7 @@ struct WordsView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         Image(systemName: "leaf").font(.system(size: 34, weight: .light))
                         Text(search.isEmpty ? "They’ll grow from here." : "No matching words yet.").font(.system(.title2, design: .rounded, weight: .medium))
-                        Text(search.isEmpty ? "As we talk, useful words and phrases find a home here. Their strength grows when you recall them over time." : "Try another \(coordinator.language.name) word or English meaning.").font(.subheadline).foregroundStyle(MuralColor.secondary)
+                        Text(search.isEmpty ? "As we talk, useful words and phrases find a home here. Their strength grows when you recall them over time." : "Try another English word or Ukrainian meaning.").font(.subheadline).foregroundStyle(MuralColor.secondary)
                     }.padding(26).frame(maxWidth: .infinity, alignment: .leading).background(MuralColor.sage, in: RoundedRectangle(cornerRadius: 28))
                 } else {
                     LazyVStack(spacing: 0) {
@@ -132,7 +107,8 @@ struct WordsView: View {
                                     }
                                     Spacer(minLength: 10)
                                     VStack(alignment: .trailing, spacing: 8) { RecallBars(count: word.bars); Text(word.label).font(.caption2).foregroundStyle(MuralColor.secondary) }
-                                }.padding(.vertical, 20)
+                                }
+                                .padding(.vertical, 20)
                             }.buttonStyle(.plain)
                             Divider().overlay(MuralColor.peach)
                         }
@@ -160,11 +136,11 @@ struct WordDetailView: View {
     let word: WordState
     let store: LearningStore
     @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 24) {
                 Text(word.lemma).font(.system(.largeTitle, design: .rounded, weight: .medium))
-                if store.language.id == "zh" { PinyinHelp(text: word.lemma) }
                 Text(word.meaning).font(.title3).foregroundStyle(MuralColor.secondary)
                 HStack { RecallBars(count: word.bars); Text(word.label).font(.subheadline) }
                 Text(word.explanation).font(.body)
@@ -191,8 +167,9 @@ struct SourcesView: View {
 
 struct TranscriptView: View {
     let session: SessionRecord?
-    var meaningLanguage = "English"
+    var meaningLanguage = "Ukrainian"
     @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -203,14 +180,18 @@ struct TranscriptView: View {
                                 Text(passage.speaker == .assistant ? "MURAL" : "YOU").font(.caption).tracking(1).foregroundStyle(MuralColor.secondary)
                                 Text(passage.text).font(.system(.title3, design: .rounded)).textSelection(.enabled)
                                     .accessibilityIdentifier(passage.speaker == .user ? "transcript-user-passage" : "transcript-assistant-passage")
-                                if session.languageID == "zh" { PinyinHelp(text: passage.text) }
+                                if let correction = passage.correction {
+                                    Text("→ \"\(correction.corrected)\"")
+                                        .font(.subheadline)
+                                        .foregroundStyle(MuralColor.secondary)
+                                        .italic()
+                                }
                                 if let translation = session.translations[MeaningRequest.cacheKey(revisionKey: passage.revisionKey, language: meaningLanguage)] ?? session.translations[meaningLanguage + "::" + passage.revisionKey] ?? session.translations[passage.revisionKey] {
                                     Text(translation).font(.subheadline).foregroundStyle(MuralColor.secondary)
                                 }
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        ForEach(session.topics) { topic in Text(.init(topic.text)); SourcesView(sources: topic.sources, date: topic.retrievedAt) }
-                        if session.fragments.isEmpty && session.topics.isEmpty { Text("Your conversation will appear here.").foregroundStyle(MuralColor.secondary) }
+                        if session.fragments.isEmpty { Text("Your conversation will appear here.").foregroundStyle(MuralColor.secondary) }
                     } else { Text("Start a conversation and your words will appear here.") }
                 }.padding(26)
             }.background(MuralColor.cream).foregroundStyle(MuralColor.ink)
@@ -225,6 +206,7 @@ struct SessionHistoryView: View {
     @State private var selected: SessionRecord?
     @State private var deleting: SessionRecord?
     @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         NavigationStack {
             List {
@@ -259,216 +241,166 @@ struct EditableTranscriptView: View {
     let sessionID: UUID
     let store: LearningStore
     @Environment(\.dismiss) private var dismiss
-    @State private var editingID: String?
-    @State private var editedText = ""
-    private var session: SessionRecord? { store.sessions.first { $0.id == sessionID } }
+    @State private var editingPassageID: String?
+    @State private var editText = ""
+
+    private var session: SessionRecord? { store.sessions.first(where: { $0.id == sessionID }) }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    ForEach(session?.passages ?? []) { passage in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text(passage.speaker == .user ? "YOU" : "MURAL").font(.caption).tracking(1)
-                                Spacer()
-                                if passage.speaker == .user && session?.endedAt != nil {
-                                    Button("Edit") { editedText = passage.text; editingID = passage.id }.font(.caption)
+                VStack(alignment: .leading, spacing: 22) {
+                    if let session {
+                        ForEach(session.passages) { passage in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(passage.speaker == .assistant ? "MURAL" : "YOU").font(.caption).tracking(1).foregroundStyle(MuralColor.secondary)
+                                    Spacer()
+                                    if passage.speaker == .user {
+                                        Button("Edit") { editingPassageID = passage.id; editText = passage.text }
+                                            .font(.caption).foregroundStyle(MuralColor.orange)
+                                    }
                                 }
-                            }.foregroundStyle(MuralColor.secondary)
-                            Text(passage.text).font(.system(.title3, design: .rounded)).textSelection(.enabled)
-                                    .accessibilityIdentifier(passage.speaker == .user ? "transcript-user-passage" : "transcript-assistant-passage")
-                            if session?.languageID == "zh" { PinyinHelp(text: passage.text) }
+                                Text(passage.text).font(.body).textSelection(.enabled)
+                            }.padding(.vertical, 4)
                         }
                     }
-                    ForEach(session?.topics ?? []) { topic in Text(.init(topic.text)); SourcesView(sources: topic.sources, date: topic.retrievedAt) }
-                }.padding(26)
+                }.padding(24)
             }.background(MuralColor.cream).foregroundStyle(MuralColor.ink)
-                .navigationTitle("Our conversation").navigationBarTitleDisplayMode(.inline)
+                .navigationTitle("Transcript").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-        }.sheet(isPresented: Binding(get: { editingID != nil }, set: { if !$0 { editingID = nil } })) {
-            NavigationStack {
-                VStack(alignment: .leading, spacing: 20) {
-                    TextField("What you said", text: $editedText, axis: .vertical).lineLimit(4...10).padding(18).background(.white, in: RoundedRectangle(cornerRadius: 20))
-                    Text("Correct a misheard phrase. Learning evidence from the old wording will be removed; the original remains in your backup history.").font(.footnote).foregroundStyle(MuralColor.secondary)
-                    Spacer()
-                }.padding(24).background(MuralColor.cream).navigationTitle("What you said").navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingID = nil } }
-                        ToolbarItem(placement: .confirmationAction) { Button("Save") { if let id = editingID { store.correctPassage(sessionID: sessionID, passageID: id, text: editedText) }; editingID = nil } }
+                .sheet(item: Binding(get: { editingPassageID.map { IdentifiableString(id: $0) } }, set: { editingPassageID = $0?.id })) { item in
+                    NavigationStack {
+                        Form {
+                            Section("Learner utterance") {
+                                TextField("Spoken text", text: $editText, axis: .vertical)
+                            }
+                        }
+                        .navigationTitle("Edit utterance").navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingPassageID = nil } }
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Save") {
+                                    store.correctPassage(sessionID: sessionID, passageID: item.id, text: editText)
+                                    editingPassageID = nil
+                                }
+                            }
+                        }
                     }
-            }.presentationDetents([.medium, .large])
+                }
         }
     }
+}
+
+private struct IdentifiableString: Identifiable {
+    let id: String
 }
 
 struct SettingsView: View {
     let coordinator: ConversationCoordinator
     @Environment(\.dismiss) private var dismiss
-    @State private var account = ManagedAccountStore()
-    @State private var hasKey = Self.initialHasKey()
+    @State private var hasKey = CredentialStore.hasKey
     @State private var showingKey = false
-    @State private var saveAndUseKey = false
-    @State private var confirmingPersonalKey = false
-    @State private var showingHostedSwitch = false
-    @State private var showingAccount = false
-    @State private var showingAIProcessing = false
     private var store: LearningStore { coordinator.store }
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
             Form {
+                // Section 1: Ukrainian Meaning
                 Section {
-                    NavigationLink {
-                        ManagedAccountView(coordinator: coordinator, store: account)
-                    } label: {
-                        HStack(spacing: 12) {
-                            MuralOrb(active: false).frame(width: 38, height: 38).accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Account")
-                                Text(account.profile?.email ?? (account.session == nil ? "Sign in, if you’d like" : "Signed in"))
-                                    .font(.footnote).foregroundStyle(MuralColor.secondary)
-                                    .lineLimit(2)
-                            }
-                        }
-                    }
-                    .disabled(coordinator.isRunning)
-                    .accessibilityIdentifier("managed-account-settings")
-                }
-                Section {
-                    LearningLanguagePicker(coordinator: coordinator)
                     Toggle("Meaning subtitles", isOn: Binding(get: { store.preferences.meaningVisible }, set: { value in
-                        if value != store.preferences.meaningVisible { coordinator.toggleMeaning() }
+                        if value != store.preferences.meaningVisible {
+                            if value && !hasKey { showingKey = true }
+                            else { coordinator.toggleMeaning() }
+                        }
                     }))
-                    Picker("Meaning language", selection: Binding(get: { store.preferences.meaningLanguage }, set: { coordinator.selectMeaningLanguage($0) })) {
-                        ForEach(MeaningLanguages.all, id: \.self) { Text($0) }
-                    }.pickerStyle(.menu).disabled(coordinator.isRunning)
+                    Button {
+                        showingKey = true
+                    } label: {
+                        LabeledContent("Gemini API key", value: hasKey ? "Saved on this iPhone" : "Add key")
+                    }
+                    .accessibilityIdentifier("settings-gemini-key")
+                } header: {
+                    Text("Ukrainian Meaning")
+                } footer: {
+                    Text("Subtitles and word lookups use Google Gemini. Spoken English practice runs 100% on-device and requires no API key.")
+                }
+
+                // Section 2: Practice Preferences
+                Section {
                     NavigationLink("Interests") { InterestsSettingsView(coordinator: coordinator) }
                         .disabled(coordinator.isRunning)
-                    Text("Corrections happen gently as you talk.")
-                        .font(.footnote).foregroundStyle(MuralColor.secondary)
-                } header: { Text("Your learning") } footer: {
-                    Text(coordinator.isRunning ? "End this conversation to switch languages. Each language keeps its own words and progress." : "Each language keeps its own words and progress.")
-                }
-                Section {
-                    Picker("Session limit", selection: Binding(get: { store.preferences.sessionMinutes }, set: { value in store.updatePreferences { $0.sessionMinutes = value } })) {
+                    Picker("Session duration", selection: Binding(get: { store.preferences.sessionMinutes }, set: { value in store.updatePreferences { $0.sessionMinutes = value } })) {
                         ForEach([5, 10, 15, 20, 30, 60], id: \.self) { Text("\($0) minutes").tag($0) }
                     }.pickerStyle(.menu).disabled(coordinator.isRunning)
-                } header: { Text("Conversation") } footer: {
-                    Text("Ends one conversation after the selected time. Your available Mural minutes are separate.")
+                } header: {
+                    Text("Practice Preferences")
+                } footer: {
+                    Text("Ends a conversation gently after the selected time.")
                 }
-                Section("Your data") {
+
+                // Section 3: Local Data
+                Section("Local Data") {
                     NavigationLink("Learning backup & data") { LearningBackupView(coordinator: coordinator) }
-                }
-                Section {
-                    Picker("Conversation access", selection: Binding(get: { coordinator.conversationProvider }, set: chooseProvider)) {
-                        Text("Mural minutes").tag(ConversationProvider.hosted)
-                        Text("My API key").tag(ConversationProvider.personalKey)
-                    }.pickerStyle(.menu).disabled(coordinator.isRunning)
-                        .accessibilityIdentifier("settings-conversation-access")
-                    if coordinator.conversationProvider == .personalKey {
-                        Text("No Mural minute limit. OpenAI bills your account for usage.")
-                            .font(.footnote).foregroundStyle(MuralColor.secondary)
-                    }
-                    if hasKey || coordinator.conversationProvider == .personalKey {
-                        Button {
-                            saveAndUseKey = coordinator.conversationProvider == .personalKey && !hasKey
-                            showingKey = true
-                        } label: {
-                            LabeledContent("API key", value: hasKey ? "Saved on this iPhone" : "Key required")
-                        }.accessibilityIdentifier("advanced-api-key")
-                    }
-                    if let failure = coordinator.personalKeyFailure {
-                        Button(failure.kind.settingsTitle) { showingKey = true }
-                            .foregroundStyle(MuralColor.secondary)
-                            .accessibilityIdentifier("advanced-provider-issue")
-                    }
-                    if coordinator.conversationProvider == .personalKey {
-                        LabeledContent("Recorded voice time", value: "\(Int(store.sessions.reduce(0) { $0 + $1.voiceSeconds }) / 60) min")
-                        LabeledContent("Search calls recorded", value: "\(store.sessions.reduce(0) { $0 + $1.searchCalls })")
-                        Text("Activity recorded on this iPhone; your OpenAI dashboard is authoritative for usage and charges.")
-                            .font(.footnote).foregroundStyle(MuralColor.secondary)
-                    }
-                } header: { Text("Advanced") }.id("advanced-section")
-                Section("Help & privacy") {
-                    Button {
-                        showingAIProcessing = true
-                    } label: {
-                        LabeledContent("AI processing", value: coordinator.hasAIConsent ? "Allowed" : "Off")
-                    }.accessibilityIdentifier("settings-ai-processing")
-                    Link("Contact support", destination: URL(string: "https://mural.chat/support/")!)
-                        .accessibilityIdentifier("settings-support")
-                    Link("Privacy policy", destination: URL(string: "https://mural.chat/privacy/")!)
-                        .accessibilityIdentifier("settings-privacy-policy")
-                    Link("Terms of use", destination: URL(string: "https://mural.chat/terms/")!)
-                        .accessibilityIdentifier("settings-terms")
                     NavigationLink("About Mural") { AboutMuralView() }
                 }
             }
             .scrollContentBackground(.hidden).background(MuralColor.cream).tint(MuralColor.ink)
-            .navigationDestination(isPresented: $showingAccount) {
-                ManagedAccountView(coordinator: coordinator, store: account)
-            }
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .onAppear {
-                if coordinator.requestAccountFocus {
-                    coordinator.requestAccountFocus = false
-                    DispatchQueue.main.async { showingAccount = true }
-                }
-                if coordinator.requestAdvancedFocus {
-                    coordinator.requestAdvancedFocus = false
-                    DispatchQueue.main.async { withAnimation { proxy.scrollTo("advanced-section", anchor: .top) } }
+            .sheet(isPresented: $showingKey, onDismiss: { hasKey = CredentialStore.hasKey }) {
+                NavigationStack {
+                    GeminiKeyView(hasKey: $hasKey)
                 }
             }
-            }
         }
-        .sheet(isPresented: $showingKey, onDismiss: {
-            if coordinator.requestHostedSwitch {
-                coordinator.requestHostedSwitch = false
-                showingHostedSwitch = true
-            }
-        }) {
-            NavigationStack {
-                OpenAIKeyView(coordinator: coordinator, hasKey: $hasKey, useAfterSave: saveAndUseKey)
-            }
-        }
-        .sheet(isPresented: $showingHostedSwitch) { HostedAccessSwitchView(coordinator: coordinator) }
-        .sheet(isPresented: $showingAIProcessing) {
-            AIProcessingSettingsView(coordinator: coordinator)
-        }
-        .confirmationDialog("Use your API key?", isPresented: $confirmingPersonalKey, titleVisibility: .visible) {
-            Button("Use my key") { coordinator.selectConversationProvider(.personalKey) }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("OpenAI bills your account for usage. Mural minutes stay available if you switch back later.") }
-        .task { account.refresh() }
-    }
-    private func chooseProvider(_ provider: ConversationProvider) {
-        guard !coordinator.isRunning, provider != coordinator.conversationProvider else { return }
-        if provider == .hosted { showingHostedSwitch = true }
-        else if hasKey { confirmingPersonalKey = true }
-        else { saveAndUseKey = true; showingKey = true }
-    }
-    private static func initialHasKey() -> Bool {
-        #if DEBUG && targetEnvironment(simulator)
-        if ProcessInfo.processInfo.arguments.contains("--preview") {
-            return ProcessInfo.processInfo.arguments.contains("--preview-key")
-        }
-        #endif
-        return CredentialStore.hasKey
     }
 }
 
-private extension ProviderFailureKind {
-    var settingsTitle: String {
-        switch self {
-        case .creditExhausted: "Credits used up"
-        case .spendLimit: "Spending limit reached"
-        case .usageLimit: "Usage limit reached"
-        case .quota: "Billing needs attention"
-        case .authentication: "Key not accepted"
-        default: "OpenAI needs attention"
+private struct GeminiKeyView: View {
+    @Binding var hasKey: Bool
+    @Environment(\.dismiss) private var dismiss
+    @State private var key = ""
+    @State private var message: String?
+    @State private var removing = false
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("API key", value: hasKey ? "Saved on this iPhone" : "No key saved")
+                SecureField(hasKey ? "Replacement key" : "AIzaSy...", text: $key)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .privacySensitive().accessibilityIdentifier("gemini-api-key")
+                Button(hasKey ? "Save replacement key" : "Save key") {
+                    do {
+                        try CredentialStore.save(key.trimmingCharacters(in: .whitespacesAndNewlines))
+                        key = ""; hasKey = true
+                        message = "Gemini key saved on this iPhone."
+                    } catch { message = error.localizedDescription }
+                }.disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if hasKey {
+                    Button("Remove key", role: .destructive) { removing = true }
+                }
+            } footer: {
+                Text("Your key stays in this iPhone's Keychain and goes only to Google Gemini for Ukrainian meaning translations and word lookups.")
+            }
+            if let message { Section { Text(message).foregroundStyle(MuralColor.secondary) } }
+            Section {
+                Link("Get a Gemini API key", destination: URL(string: "https://aistudio.google.com/apikey")!)
+            }
         }
+        .scrollContentBackground(.hidden).background(MuralColor.cream)
+        .navigationTitle("Gemini API key").navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { key = ""; dismiss() } } }
+        .confirmationDialog("Remove the saved Gemini key?", isPresented: $removing, titleVisibility: .visible) {
+            Button("Remove key", role: .destructive) {
+                do {
+                    try CredentialStore.delete()
+                    hasKey = false; key = ""
+                    message = "Key removed."
+                } catch { message = error.localizedDescription }
+            }
+        } message: { Text("Without an API key, Ukrainian meaning subtitles and word lookups will be paused.") }
     }
 }
 
@@ -478,134 +410,12 @@ private struct InterestsSettingsView: View {
         Form {
             Section {
                 TextField("A few things you enjoy", text: Binding(get: { coordinator.store.preferences.interests }, set: { value in
-                    coordinator.store.updatePreferences { $0.interests = String(value.prefix(500)) }
+                    coordinator.store.updatePreferences { $0.interests = String(value.prefix(200)) }
                 }), axis: .vertical)
                 .lineLimit(4...10).disabled(coordinator.isRunning)
                 .accessibilityIdentifier("settings-interests")
-            } footer: { Text("Helps Mural suggest conversations that matter to you. Saved as you type on this iPhone.") }
+            } footer: { Text("Helps Mural adapt spoken conversation topics to your interests (up to 200 characters).") }
         }.scrollContentBackground(.hidden).background(MuralColor.cream).navigationTitle("Interests")
-    }
-}
-
-private struct OpenAIKeyView: View {
-    let coordinator: ConversationCoordinator
-    @Binding var hasKey: Bool
-    let useAfterSave: Bool
-    @Environment(\.dismiss) private var dismiss
-    @State private var key = ""
-    @State private var message: String?
-    @State private var removing = false
-    var body: some View {
-        Form {
-            Section {
-                LabeledContent("API key", value: hasKey ? "Saved on this iPhone" : "No key saved")
-                SecureField(hasKey ? "Replacement key" : "New key", text: $key)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .privacySensitive().accessibilityIdentifier("api-key")
-                Button(useAfterSave ? "Save & use my key" : hasKey ? "Save replacement key" : "Save key") {
-                    do {
-                        #if DEBUG && targetEnvironment(simulator)
-                        if !ProcessInfo.processInfo.arguments.contains("--preview") {
-                            try CredentialStore.save(key.trimmingCharacters(in: .whitespacesAndNewlines))
-                        }
-                        #else
-                        try CredentialStore.save(key.trimmingCharacters(in: .whitespacesAndNewlines))
-                        #endif
-                        key = ""; hasKey = true; coordinator.clearPersonalKeyFailure()
-                        if useAfterSave { coordinator.selectConversationProvider(.personalKey) }
-                        message = "Key saved on this iPhone. It will be checked when you start a conversation."
-                    } catch { message = error.localizedDescription }
-                }.disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || coordinator.isRunning)
-                if hasKey {
-                    Button("Remove key", role: .destructive) { removing = true }
-                        .disabled(coordinator.isRunning)
-                }
-            } footer: { Text("No Mural minute limit. OpenAI bills your account for usage. The key stays in this iPhone’s Keychain and goes only to OpenAI.") }
-            if let failure = coordinator.personalKeyFailure {
-                Section("OpenAI issue") {
-                    Text(failure.localizedDescription)
-                    if coordinator.conversationProvider == .personalKey {
-                        Button("Use Mural minutes") { dismiss(); coordinator.requestHostedSwitch = true }
-                    }
-                }
-            }
-            if let message { Section { Text(message).foregroundStyle(MuralColor.secondary) } }
-            Section {
-                Link("Manage API keys", destination: URL(string: "https://platform.openai.com/api-keys")!)
-                Link("Usage and billing", destination: URL(string: "https://platform.openai.com/usage")!)
-            }
-        }.scrollContentBackground(.hidden).background(MuralColor.cream)
-            .navigationTitle("API key").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { key = ""; dismiss() } } }
-            .confirmationDialog("Remove the saved key?", isPresented: $removing, titleVisibility: .visible) {
-                Button("Remove key", role: .destructive) {
-                    do {
-                        #if DEBUG && targetEnvironment(simulator)
-                        if !ProcessInfo.processInfo.arguments.contains("--preview") { try CredentialStore.delete() }
-                        #else
-                        try CredentialStore.delete()
-                        #endif
-                        hasKey = false; key = ""
-                        coordinator.clearPersonalKeyFailure()
-                        message = coordinator.conversationProvider == .personalKey
-                            ? "Key removed. Add a key or choose Mural minutes before talking."
-                            : "Key removed."
-                    } catch { message = error.localizedDescription }
-                }
-            } message: { Text("If this key is selected for conversations, Mural will wait for a new key or your explicit choice to use Mural minutes.") }
-    }
-}
-
-private struct HostedAccessSwitchView: View {
-    let coordinator: ConversationCoordinator
-    @Environment(\.dismiss) private var dismiss
-    @State private var available: HostedBalance?
-    @State private var checking = true
-    @State private var failed = false
-    @State private var switchTask: Task<Void, Never>?
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    if checking { ProgressView("Checking your minutes…") }
-                    else if let available {
-                        LabeledContent("Available", value: available.displayText)
-                        if !available.canStart {
-                            Text(available.paidReserved ? "Some minutes are in use. Check again shortly." :
-                                 "Not enough minutes to start a conversation.")
-                        }
-                    }
-                    else { Text("Couldn’t check your minutes. Try again.") }
-                    if failed { Text("Your minutes changed. Check again before switching.").foregroundStyle(MuralColor.secondary) }
-                    if !checking && available == nil { Button("Try again") { Task { await check() } } }
-                } header: { Text("Mural minutes") } footer: { Text("Your saved OpenAI key will remain on this iPhone. Switching changes the next conversation only.") }
-                if let available, available.canStart, !checking {
-                    Section {
-                        Button("Use Mural minutes") {
-                            switchTask = Task {
-                                checking = true
-                                guard let latest = await coordinator.hostedBalanceForSwitch(), latest.canStart,
-                                      !Task.isCancelled, coordinator.conversationProvider == .personalKey,
-                                      !coordinator.isRunning else {
-                                    self.available = nil; failed = true; checking = false; return
-                                }
-                                coordinator.selectConversationProvider(.hosted)
-                                dismiss()
-                            }
-                        }.frame(maxWidth: .infinity).fontWeight(.semibold)
-                    }
-                }
-            }.scrollContentBackground(.hidden).background(MuralColor.cream)
-                .navigationTitle("Conversation access").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-        }
-        .task { await check() }
-        .onDisappear { switchTask?.cancel() }
-    }
-    private func check() async {
-        checking = true; failed = false
-        available = await coordinator.hostedBalanceForSwitch()
-        checking = false
     }
 }
 
@@ -616,6 +426,7 @@ private struct LearningBackupView: View {
     @State private var importing = false
     @State private var deleting = false
     @State private var message: String?
+
     var body: some View {
         Form {
             Section {
@@ -627,7 +438,7 @@ private struct LearningBackupView: View {
                     .disabled(coordinator.isRunning)
                 Button("Delete all conversations and learning", role: .destructive) { deleting = true }
                     .disabled(coordinator.isRunning)
-            } footer: { Text("Backups include transcripts and learning evidence, never your API key. Import adds conversations with new IDs. Learning stays on this iPhone unless you export it.") }
+            } footer: { Text("Backups include transcripts and learning progress. Conversations and vocabulary stay entirely on this iPhone unless exported.") }
             if let message { Section { Text(message) } }
         }.scrollContentBackground(.hidden).background(MuralColor.cream).navigationTitle("Learning data")
             .fileExporter(isPresented: $exporting, document: backup, contentType: .json, defaultFilename: "Mural-learning-backup") { result in
@@ -642,47 +453,25 @@ private struct LearningBackupView: View {
             }
             .confirmationDialog("Delete all learning data on this phone?", isPresented: $deleting, titleVisibility: .visible) {
                 Button("Delete all learning data", role: .destructive) { coordinator.deleteLearningData() }
-            } message: { Text("This removes conversations, vocabulary and progress. Export a backup first if you want to keep them. Your key and account remain.") }
+            } message: { Text("This removes conversations, vocabulary and progress. Export a backup first if you want to keep them.") }
     }
 }
 
 private struct AboutMuralView: View {
-    @State private var notices = false
     var body: some View {
         Form {
             Section {
                 LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-                Link("AI Data Controls", destination: URL(string: "https://developers.openai.com/api/docs/guides/your-data")!)
-                Button("Open-source notices") { notices = true }
+                LabeledContent("Target Language", value: "English")
+                LabeledContent("Helper Language", value: "Ukrainian")
+                LabeledContent("Conversation Engine", value: "On-Device Apple AFM")
             }
             Section {
-                Text("For Mural minutes, audio and selected text pass through Mural’s server to OpenAI. With your own key, they go directly to OpenAI. Raw audio is not saved by Mural.")
+                Text("Spoken conversations run 100% on your device with Apple Foundation Models and Speech framework. Meaning translations and lookups use Google Gemini.")
             }
         }.scrollContentBackground(.hidden).background(MuralColor.cream).navigationTitle("About Mural")
-            .sheet(isPresented: $notices) {
-                NavigationStack {
-                    ScrollView {
-                        Text(Bundle.main.url(forResource: "ThirdPartyNotices", withExtension: "txt")
-                            .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "Notices unavailable.")
-                            .font(.footnote).padding(24).textSelection(.enabled)
-                    }.navigationTitle("Open-source notices").navigationBarTitleDisplayMode(.inline)
-                }
-            }
     }
 }
-
-struct LearningLanguagePicker: View {
-    let coordinator: ConversationCoordinator
-    var body: some View {
-        Picker("Learning language", selection: Binding(get: { coordinator.language.id }, set: { coordinator.selectLanguage($0) })) {
-            ForEach(LanguageRegistry.all) { language in Text(language.settingsTitle).tag(language.id) }
-        }
-        .pickerStyle(.menu)
-        .disabled(coordinator.isRunning)
-        .accessibilityIdentifier("learning-language-picker")
-    }
-}
-
 
 private struct FlashcardSession: Identifiable {
     let id = UUID()
@@ -695,81 +484,31 @@ private struct FlashcardsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selection = 0
     @State private var dragOffset = 0.0
-    @State private var dragAxis = 0
     @State private var advancing = false
     @State private var revealAllowedAfter = Date.distantPast
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                if deck.words.isEmpty {
-                    ContentUnavailableView("No words yet", systemImage: "leaf", description: Text("Useful words from your conversations will appear here."))
-                } else {
-                    GeometryReader { geometry in
-                        let direction = dragOffset > 0 ? -1 : 1
-                        let destination = deck.destination(from: selection, direction: direction)
-                        ZStack {
-                            if destination != selection {
-                                FlashcardView(word: deck.words[destination], selected: false, showContent: abs(dragOffset) > 6)
-                                    .padding(.horizontal, 24).scaleEffect(0.94 + min(abs(dragOffset) / geometry.size.width, 1) * 0.06)
-                                    .offset(y: 12).opacity(0.7).allowsHitTesting(false).accessibilityHidden(true)
-                            }
-                            FlashcardView(word: deck.words[selection], selected: true, canReveal: { !advancing && Date() > revealAllowedAfter }).id(deck.words[selection].id)
-                                .padding(.horizontal, 24).offset(x: dragOffset)
-                                .rotationEffect(.degrees(reduceMotion ? 0 : dragOffset / geometry.size.width * 12))
-                                .simultaneousGesture(DragGesture(minimumDistance: 12)
-                                    .onChanged { value in
-                                        guard !advancing else { return }
-                                        revealAllowedAfter = Date().addingTimeInterval(0.3)
-                                        if dragAxis == 0 { dragAxis = abs(value.translation.width) > abs(value.translation.height) ? 1 : -1 }
-                                        guard dragAxis == 1 else { return }
-                                        let candidate = value.translation.width
-                                        let target = deck.destination(from: selection, direction: candidate < 0 ? 1 : -1)
-                                        dragOffset = target == selection ? candidate * 0.2 : candidate
-                                    }
-                                    .onEnded { value in
-                                        revealAllowedAfter = Date().addingTimeInterval(0.3)
-                                        let horizontal = dragAxis == 1
-                                        dragAxis = 0
-                                        guard !advancing else { return }
-                                        let distance = value.translation.width
-                                        if horizontal && (abs(distance) > geometry.size.width * 0.22 || abs(value.predictedEndTranslation.width) > geometry.size.width * 0.5) {
-                                            move(distance < 0 ? 1 : -1, width: geometry.size.width)
-                                        } else {
-                                            withAnimation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.82)) { dragOffset = 0 }
-                                        }
-                                    })
+            GeometryReader { geometry in
+                let width = max(240, geometry.size.width - 56)
+                ScrollViewReader { _ in
+                    TabView(selection: $selection) {
+                        ForEach(deck.words.indices, id: \.self) { index in
+                            FlashcardView(word: deck.words[index], selected: index == selection, canReveal: {
+                                Date() >= revealAllowedAfter && !advancing
+                            })
+                            .frame(maxWidth: width)
+                            .tag(index)
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }.accessibilityElement(children: .contain)
-                        .accessibilityLabel("Flashcard")
-                        .accessibilityValue("\(selection + 1) of \(deck.words.count)")
-                        .accessibilityIdentifier("flashcard-pager")
-                        .accessibilityActions {
-                            if selection > 0 { Button("Previous word") { move(-1, width: 500) } }
-                            if selection < deck.words.count - 1 { Button("Next word") { move(1, width: 500) } }
-                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .automatic))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            }.padding(.top, 16).background(MuralColor.cream).foregroundStyle(MuralColor.ink)
-                .navigationTitle("Your words").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.accessibilityIdentifier("close-flashcards") } }
+            }
+            .padding(.top, 16).background(MuralColor.cream).foregroundStyle(MuralColor.ink)
+            .navigationTitle("Your words").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.accessibilityIdentifier("close-flashcards") } }
         }.tint(MuralColor.ink).presentationDetents([.large]).presentationDragIndicator(.hidden).interactiveDismissDisabled()
-    }
-    private func move(_ direction: Int, width: Double) {
-        guard !advancing else { return }
-        let destination = deck.destination(from: selection, direction: direction)
-        guard destination != selection else {
-            withAnimation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.82)) { dragOffset = 0 }
-            return
-        }
-        if reduceMotion { selection = destination; dragOffset = 0; return }
-        advancing = true
-        withAnimation(.easeIn(duration: 0.2), completionCriteria: .logicallyComplete) {
-            dragOffset = direction > 0 ? -width * 1.2 : width * 1.2
-        } completion: {
-            selection = destination
-            dragOffset = 0
-            advancing = false
-        }
     }
 }
 
@@ -780,6 +519,7 @@ private struct FlashcardView: View {
     var showContent = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var revealed = false
+
     var body: some View {
         ZStack {
             face(back: false).modifier(FlashcardFaceRotation(angle: revealed && !reduceMotion ? 180 : 0, back: false))
@@ -788,6 +528,7 @@ private struct FlashcardView: View {
                 .opacity(reduceMotion && !revealed ? 0 : 1).accessibilityHidden(!revealed).allowsHitTesting(revealed)
         }.onChange(of: selected) { _, _ in revealed = false }
     }
+
     private func face(back: Bool) -> some View {
         ScrollView {
             VStack(spacing: 28) {
@@ -810,6 +551,7 @@ private struct FlashcardView: View {
                 .padding(.vertical, 12)
         }.defaultScrollAnchor(.center, for: .alignment).scrollIndicators(.hidden)
     }
+
     private func reveal() {
         guard canReveal() else { return }
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.48)) { revealed.toggle() }

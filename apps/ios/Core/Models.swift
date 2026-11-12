@@ -25,6 +25,13 @@ public struct Passage: Identifiable, Sendable {
     public var id: String
     public var speaker: Speaker
     public var fragments: [Fragment]
+    public var correction: GatedCorrection?
+    public init(id: String, speaker: Speaker, fragments: [Fragment], correction: GatedCorrection? = nil) {
+        self.id = id
+        self.speaker = speaker
+        self.fragments = fragments
+        self.correction = correction
+    }
     public var text: String { Self.join(fragments.map(\.text)) }
     /// Deltas can end inside a word. Preserve them, repairing only a clear sentence break.
     public static func join(_ parts: [String]) -> String {
@@ -197,11 +204,11 @@ public struct SessionRecord: Codable, Identifiable, Sendable {
 public struct Preferences: Codable, Sendable {
     public var learningLanguageID = LanguageRegistry.defaultID
     public var meaningVisible = true
-    public var meaningLanguage = "English"
+    public var meaningLanguage = "Ukrainian"
     public var sessionMinutes = 15
     public var hiddenWords: [String] = []
     public var interests = ""
-    public var hasOnboarded = false
+    public var hasOnboarded = true
     public var aiConsentVersion: Int?
     public init() {}
 }

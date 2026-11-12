@@ -6,9 +6,9 @@ final class LearningTests: XCTestCase {
         let date = Date(timeIntervalSince1970: 1_780_000_000 + day * 86400)
         var s = SessionRecord(themeID: theme)
         s.startedAt = date
-        s.append(Fragment(id: UUID().uuidString, speaker: .user, text: "Jeg gikk i skogen.", startMS: 1000, endMS: 2000, receivedAt: date, meaningVisible: supported))
+        s.append(Fragment(id: UUID().uuidString, speaker: .user, text: "I walked in the forest.", startMS: 1000, endMS: 2000, receivedAt: date, meaningVisible: supported))
         let p = s.passages[0]
-        s.assessments = [Assessment(passageID: p.id, revisionKey: p.revisionKey, outcome: .success, suggestedLevel: 2, nextGoal: "Fortell mer.", capability: "Describes a past outing", words: [WordProposal(lemma: "å gå", meaning: "to go", form: "gikk", kind: kind, confidence: 0.95, sourceIDs: p.fragments.map(\.id), quote: "Jeg gikk i skogen.")], createdAt: date, context: theme)]
+        s.assessments = [Assessment(passageID: p.id, revisionKey: p.revisionKey, outcome: .success, suggestedLevel: 2, nextGoal: "Tell me more.", capability: "Describes a past outing", words: [WordProposal(lemma: "walk", meaning: "to walk", form: "walked", kind: kind, confidence: 0.95, sourceIDs: p.fragments.map(\.id), quote: "I walked in the forest.", language: "en")], createdAt: date, context: theme)]
         return s
     }
     func testDuplicateProviderEventsDoNotChangeTranscript() {
@@ -59,11 +59,11 @@ final class LearningTests: XCTestCase {
     }
     func testImmediateImitationIsAssisted() {
         var s = fixture()
-        s.fragments.insert(Fragment(speaker: .assistant, text: "Du gikk en tur?", startMS: 0, endMS: 500), at: 0)
+        s.fragments.insert(Fragment(speaker: .assistant, text: "You walked in the park?", startMS: 0, endMS: 500), at: 0)
         XCTAssertEqual(LearningEngine.validate(s.assessments[0], session: s)?.words[0].kind, .assisted)
     }
-    func testEnglishCannotAwardNorwegianProduction() {
-        var s = fixture(); s.assessments[0].words[0].language = "en"
+    func testForeignLanguageCannotAwardEnglishProduction() {
+        var s = fixture(); s.assessments[0].words[0].language = "fr"
         XCTAssertEqual(LearningEngine.validate(s.assessments[0], session: s)?.words.count, 0)
     }
     func testTypingCannotAwardIndependentSpokenRecall() {
@@ -73,21 +73,21 @@ final class LearningTests: XCTestCase {
     func testFabricatedSourceAndQuotesAreRejected() {
         var s = fixture(); s.assessments[0].words[0].sourceIDs = ["invented"]
         XCTAssertEqual(LearningEngine.validate(s.assessments[0], session: s)?.words.count, 0)
-        s = fixture(); s.assessments[0].words[0].quote = "Jeg kan fly."
+        s = fixture(); s.assessments[0].words[0].quote = "I can fly."
         XCTAssertEqual(LearningEngine.validate(s.assessments[0], session: s)?.words.count, 0)
     }
     func testQuoteAcrossProviderWordBoundaryIsKept() {
-        var session = SessionRecord(languageID: "es")
-        session.append(Fragment(id: "f1", speaker: .user, text: "Me gusta", startMS: 0, endMS: 500))
-        session.append(Fragment(id: "f2", speaker: .user, text: " el café", startMS: 600, endMS: 1200))
+        var session = SessionRecord(languageID: "en")
+        session.append(Fragment(id: "f1", speaker: .user, text: "I like", startMS: 0, endMS: 500))
+        session.append(Fragment(id: "f2", speaker: .user, text: " the coffee", startMS: 600, endMS: 1200))
         let passage = session.passages[0]
-        XCTAssertEqual(passage.text, "Me gusta el café")
+        XCTAssertEqual(passage.text, "I like the coffee")
         session.assessments = [Assessment(
             passageID: passage.id, revisionKey: passage.revisionKey, outcome: .success,
-            suggestedLevel: 1, nextGoal: "Sigue.", capability: "Expresses liking",
-            words: [WordProposal(lemma: "gustar", meaning: "to like", form: "gusta",
+            suggestedLevel: 1, nextGoal: "Continue.", capability: "Expresses liking",
+            words: [WordProposal(lemma: "like", meaning: "to like", form: "like",
                 kind: .independent, confidence: 0.95, sourceIDs: ["f1", "f2"],
-                quote: "Me gusta el café", language: "es")])]
+                quote: "I like the coffee", language: "en")])]
         XCTAssertEqual(LearningEngine.validate(session.assessments[0], session: session)?.words.count, 1)
     }
     func testDuplicateAssessmentsNeverDoubleCredit() {
@@ -216,5 +216,5 @@ final class LearningTests: XCTestCase {
         XCTAssertNil(SourceLink(title: "bad", url: "https://user@example.com/page").safeURL)
         XCTAssertNotNil(SourceLink(title: "good", url: "https://www.nrk.no/").safeURL)
     }
-    func testTwentyFourDistinctThemes() { XCTAssertEqual(Set(LanguageModule.norwegian.themes.map(\.id)).count, 24) }
+    func testTwentyThreeDistinctThemes() { XCTAssertEqual(Set(LanguageModule.english.themes.map(\.id)).count, 23) }
 }

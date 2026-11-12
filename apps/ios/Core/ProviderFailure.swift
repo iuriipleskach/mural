@@ -56,17 +56,14 @@ public struct ProviderFailure: LocalizedError, Sendable {
     }
     public var errorDescription: String? {
         let message: String = switch kind {
-        case .authentication: "Your OpenAI key wasn’t accepted. Check it in Settings."
-        case .modelAccess: "This API key may not have access to the requested model. Check your OpenAI project."
-        case .creditExhausted: "OpenAI credits used up. Check your OpenAI billing or use Mural minutes."
-        case .spendLimit: "Your OpenAI spending limit was reached. Check the project or organization limit, or use Mural minutes."
-        case .usageLimit: "Your OpenAI usage limit was reached. Check your organization’s limit, or use Mural minutes."
-        case .quota: "OpenAI billing needs attention. Check your billing and limits, or use Mural minutes."
-        case .rateLimit: "OpenAI is limiting requests. Wait briefly and try again. If this continues, check your project’s billing and limits."
-        case .unavailable: "The voice or teaching service is temporarily unavailable. Please try again shortly."
-        case .invalidRequest: "The service could not accept this request. If this continues, contact support."
+        case .authentication: "Your Gemini key wasn’t accepted. Check it in Settings."
+        case .modelAccess: "This API key may not have access to the requested model. Check your Gemini API configuration."
+        case .creditExhausted, .spendLimit, .usageLimit, .quota: "Gemini quota or billing limits exceeded. Check your billing and limits in Google AI Studio."
+        case .rateLimit: "Gemini is limiting requests. Wait briefly and try again."
+        case .unavailable: "The translation service is temporarily unavailable. Please try again shortly."
+        case .invalidRequest: "The service could not accept this request."
         case .unknown: "The service could not complete this request. Please try again later."
         }
-        return reference.map { message + "\n\nOpenAI reference: " + $0 } ?? message
+        return reference.map { message + "\n\nReference: " + $0 } ?? message
     }
 }
