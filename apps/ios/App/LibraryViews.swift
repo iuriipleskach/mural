@@ -327,22 +327,25 @@ struct SettingsView: View {
                 }
 
                 // Section 2: Practice Preferences
-                Section {
+                Section("Practice Preferences") {
                     NavigationLink("Interests") { InterestsSettingsView(coordinator: coordinator) }
                         .disabled(coordinator.isRunning)
-                    Picker("Session duration", selection: Binding(get: { store.preferences.sessionMinutes }, set: { value in store.updatePreferences { $0.sessionMinutes = value } })) {
-                        ForEach([5, 10, 15, 20, 30, 60], id: \.self) { Text("\($0) minutes").tag($0) }
-                    }.pickerStyle(.menu).disabled(coordinator.isRunning)
-                } header: {
-                    Text("Practice Preferences")
-                } footer: {
-                    Text("Ends a conversation gently after the selected time.")
                 }
 
                 // Section 3: Local Data
-                Section("Local Data") {
+                Section {
                     NavigationLink("Learning backup & data") { LearningBackupView(coordinator: coordinator) }
                     NavigationLink("About Mural") { AboutMuralView() }
+                    LabeledContent("Build", value: "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))")
+                        .accessibilityIdentifier("settings-build-number")
+                } header: {
+                    Text("Local Data")
+                } footer: {
+                    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+                    let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+                    Text("Mural v\(version) (\(build))")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 4)
                 }
             }
             .scrollContentBackground(.hidden).background(MuralColor.cream).tint(MuralColor.ink)
@@ -461,7 +464,9 @@ private struct AboutMuralView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+                let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+                let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+                LabeledContent("Version", value: "\(version) (\(build))")
                 LabeledContent("Target Language", value: "English")
                 LabeledContent("Helper Language", value: "Ukrainian")
                 LabeledContent("Conversation Engine", value: "On-Device Apple AFM")
