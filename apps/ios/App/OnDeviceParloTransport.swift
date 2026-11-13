@@ -120,6 +120,37 @@ public final class OnDeviceParloTransport: NSObject {
         self.interests = interests
     }
 
+    // MARK: - Permissions
+
+    private func requestPermissions() async -> Bool {
+        #if !os(iOS)
+        return true
+        #else
+        if AVAudioApplication.shared.recordPermission == .denied {
+            return false
+        }
+        if AVAudioApplication.shared.recordPermission != .granted {
+            guard await AVAudioApplication.requestRecordPermission() else {
+                return false
+            }
+        }
+
+        if SFSpeechRecognizer.authorizationStatus() == .denied || SFSpeechRecognizer.authorizationStatus() == .restricted {
+            return false
+        }
+        if SFSpeechRecognizer.authorizationStatus() != .authorized {
+            let speechStatus = await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { status in
+                    continuation.resume(returning: status)
+                }
+            }
+            guard speechStatus == .authorized else { return false }
+        }
+
+        return true
+        #endif
+    }
+
     // MARK: - Transport Lifecycle
 
     public func connect(
@@ -144,33 +175,18 @@ public final class OnDeviceParloTransport: NSObject {
         self.isMuted = false
         self.started = false
 
-        // Request microphone and speech recognition permissions
-        let micGranted = await AVAudioApplication.requestRecordPermission()
-        guard micGranted else {
-            throw NSError(domain: "chat.mural.error", code: 1, userInfo: [NSLocalizedDescriptionKey: "Microphone permission is required."])
+        // Request microphone and speech recognition permissions explicitly
+        guard await requestPermissions() else {
+            throw NSError(domain: "chat.mural.error", code: 1, userInfo: [NSLocalizedDescriptionKey: "Microphone and speech recognition permissions are required."])
         }
 
-        let speechStatus = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
-            }
-        }
-        guard speechStatus == .authorized else {
-            throw NSError(domain: "chat.mural.error", code: 2, userInfo: [NSLocalizedDescriptionKey: "Speech recognition permission is required."])
-        }
-
-        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")), recognizer.isAvailable else {
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")) else {
             throw NSError(domain: "chat.mural.error", code: 3, userInfo: [NSLocalizedDescriptionKey: "English speech recognizer unavailable."])
         }
         self.speechRecognizer = recognizer
 
         // Configure session-scoped AVAudioSession
         try configureAudioSession()
-
-        // Keep a single AVAudioEngine initialized for the session duration
-        let engine = AVAudioEngine()
-        self.audioEngine = engine
-        engine.prepare()
 
         // Start level meter loop
         startLevelMeterLoop()
@@ -187,9 +203,6 @@ public final class OnDeviceParloTransport: NSObject {
             "type": "session.started",
             "session": ["id": sessionID.uuidString]
         ])
-
-        // Begin listening for learner speech
-        try startListening()
     }
 
     public func send(_ event: [String: Any]) -> Bool {
@@ -281,16 +294,9 @@ public final class OnDeviceParloTransport: NSObject {
         smoothedOutputLevel = 0
         onLevels?(0, 0)
 
-        if let engine = audioEngine {
-            if isTapInstalled {
-                engine.inputNode.removeTap(onBus: 0)
-                isTapInstalled = false
-            }
-            if engine.isRunning {
-                engine.stop()
-            }
-        }
-        audioEngine = nil
+        stopListening()
+        synthesizer.stopSpeaking(at: .immediate)
+        isSynthesizerSpeaking = false
 
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -307,7 +313,7 @@ public final class OnDeviceParloTransport: NSObject {
 
     private func startLevelMeterLoop() {
         levelMeterTimer?.cancel()
-        levelMeterTimer = Task { [weak self] in
+        levelMeterTimer = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard let self else { return }
@@ -345,22 +351,19 @@ public final class OnDeviceParloTransport: NSObject {
         // Clean up any lingering request or task before starting a new listening turn
         stopListening()
 
-        let engine = self.audioEngine ?? AVAudioEngine()
+        guard let recognizer = speechRecognizer, recognizer.isAvailable else { return }
+
+        let engine = AVAudioEngine()
         self.audioEngine = engine
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
-        guard format.sampleRate > 0 else { return }
-
-        if !engine.isRunning {
-            try engine.start()
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            self.audioEngine = nil
+            return
         }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
-        if let recognizer = speechRecognizer {
-            request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
-        } else {
-            request.requiresOnDeviceRecognition = true
-        }
+        request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
         request.shouldReportPartialResults = true
         self.recognitionRequest = request
         self.currentUtteranceText = ""
@@ -372,10 +375,6 @@ public final class OnDeviceParloTransport: NSObject {
         let taskID = UUID()
         self.currentRecognitionTaskID = taskID
 
-        if isTapInstalled {
-            inputNode.removeTap(onBus: 0)
-            isTapInstalled = false
-        }
         let state = self.audioState
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak request] buffer, _ in
             guard state.isCapturingAudio, let request else { return }
@@ -394,7 +393,19 @@ public final class OnDeviceParloTransport: NSObject {
         }
         isTapInstalled = true
 
-        guard let recognizer = speechRecognizer else { return }
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            if isTapInstalled {
+                inputNode.removeTap(onBus: 0)
+                isTapInstalled = false
+            }
+            audioState.isCapturingAudio = false
+            self.audioEngine = nil
+            throw error
+        }
+
         self.recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor [weak self] in
                 guard let self, self.currentRecognitionTaskID == taskID else { return }
@@ -416,19 +427,19 @@ public final class OnDeviceParloTransport: NSObject {
         // 1. Set isCapturingAudio = false
         audioState.isCapturingAudio = false
 
-        // 2. Remove input tap on bus 0 ONLY if a tap is installed
+        // 2. Remove input tap on bus 0 and stop engine
         if let engine = audioEngine {
             if isTapInstalled {
                 engine.inputNode.removeTap(onBus: 0)
                 isTapInstalled = false
             }
-            // 3. Pause or stop the engine input (do not rebuild the engine)
             if engine.isRunning {
-                engine.pause()
+                engine.stop()
             }
         }
+        audioEngine = nil
 
-        // 4. Only then call recognitionRequest?.endAudio()
+        // 3. Only then call recognitionRequest?.endAudio()
         recognitionRequest?.endAudio()
         recognitionRequest = nil
 
@@ -473,7 +484,7 @@ public final class OnDeviceParloTransport: NSObject {
 
     private func startSilenceCheckTimer() {
         silenceCheckTimer?.cancel()
-        silenceCheckTimer = Task { [weak self] in
+        silenceCheckTimer = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard let self else { return }
